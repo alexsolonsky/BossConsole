@@ -2,6 +2,7 @@ package ai.rever.boss.plugin.browser
 
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.runBlocking
+import kotlinx.serialization.json.Json
 import java.io.File
 import kotlin.coroutines.CoroutineContext
 import kotlin.test.AfterTest
@@ -311,15 +312,21 @@ class UrlHistoryManagerTest {
         try {
             UrlHistoryManager.addUrl("https://first.example/", "First")
             UrlHistoryManager.addUrl("https://second.example/", "Second")
+            UrlHistoryManager.addUrl("https://retained.example/", "Retained")
             UrlHistoryManager.deleteUrl("https://first.example/")
             UrlHistoryManager.deleteUrl("https://second.example/")
 
             // Force the later save to start first, rather than relying on an IO race.
+            // Removing previous?.join() from the writer makes the second deletion reappear.
             dispatcher.drainNewestFirst()
             runBlocking { UrlHistoryManager.awaitPendingWrites() }
             UrlHistoryManager.loadHistory()
 
-            assertTrue(UrlHistoryManager.getSuggestions("example").isEmpty())
+            // A retained entry and direct decode reject unwritten or corrupt-file false positives.
+            val expectedUrls = listOf("https://retained.example/")
+            val persisted = Json.decodeFromString<List<UrlHistoryEntry>>(tempFile.readText())
+            assertEquals(expectedUrls, persisted.map { it.url })
+            assertEquals(expectedUrls, UrlHistoryManager.getSuggestions("example").map { it.url })
         } finally {
             dispatcher.drainNewestFirst()
             UrlHistoryManager.persistenceContext = previousContext
@@ -327,6 +334,7 @@ class UrlHistoryManagerTest {
     }
 
     private class NewestFirstDispatcher : CoroutineDispatcher() {
+        // Dispatch and drain both run on this test thread, including resumed continuations.
         private val queued = ArrayDeque<Runnable>()
 
         override fun dispatch(

@@ -12,7 +12,6 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
-import kotlinx.coroutines.withContext
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 import java.io.File
@@ -514,6 +513,10 @@ object UrlHistoryManager {
         }
     }
 
+    /**
+     * Wait for this snapshot and earlier queued saves to finish attempting persistence.
+     * Write failures are logged. Cancelling the caller stops its wait, not the queued save.
+     */
     suspend fun saveHistory() {
         persistInBackground().join()
     }
@@ -540,7 +543,7 @@ object UrlHistoryManager {
     private suspend fun writeTo(
         target: File,
         entries: List<UrlHistoryEntry>,
-    ) = withContext(persistenceContext) {
+    ) {
         saveLock.withLock {
             try {
                 // Atomic: a crash or a concurrent writer leaves the previous file intact
